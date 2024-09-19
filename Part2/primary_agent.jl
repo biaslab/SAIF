@@ -1,6 +1,6 @@
 function initializePrimaryAgent(B, C, D)
     iterations = 50 # Iterations of variational algorithm
-    function infer(t::Int64, a::Vector, o::Vector, a_prime::Int64) # Inference depends on offer by secondary agent
+    function inference(t::Int64, a::Vector, o::Vector, a_prime::Int64) # Inference depends on offer by secondary agent
         # Define possible policies
         G = Matrix{Union{Float64, Missing}}(missing, 4, 4)
         if t === 1
@@ -28,21 +28,20 @@ function initializePrimaryAgent(B, C, D)
     
         # Define model
         A_s = constructPrimaryA(αs[a_prime]) # Offer is encoded by primary observation matrix
-        model = t_maze_primary(A_s, D, x)
+        model = t_maze_primary(A_s=A_s, D=D, x=x)
         
+        # Define constraints
+        initialization = init_marginals_primary()
+
         for (i, j) in pols
             data = (u = [B[i], B[j]],
                     c = [C, C])
-    
-            initmarginals = (z_0 = Categorical(asym(16)),
-                             z   = [Categorical(asym(16)),
-                                    Categorical(asym(16))])
-    
-            res = inference(model         = model,
-                            data          = data,
-                            initmarginals = initmarginals,
-                            iterations    = iterations,
-                            free_energy   = true)
+        
+            res = infer(model          = model,
+                        data           = data,
+                        initialization = initialization,
+                        iterations     = iterations,
+                        free_energy    = true)
             
             G[i, j] = res.free_energy[end]/log(2) # Convert to bits
         end
@@ -59,6 +58,6 @@ function initializePrimaryAgent(B, C, D)
         return idx[pol][t] # Select current action from policy
     end
 
-    return (infer, act)
+    return (inference, act)
 end
 ;

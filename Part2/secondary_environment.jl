@@ -8,7 +8,7 @@ function initializeSecondaryWorld()
         
         # Simulate interaction of primary agent with T-maze
         for t=1:2
-              G_t = infer(t, as, os, a_prime)
+              G_t = inference(t, as, os, a_prime)
             as[t] = act(t, G_t)
                     execute(as[t])
             os[t] = observe()
