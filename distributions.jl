@@ -1,14 +1,14 @@
-using DomainSets: Domain
-using StatsFuns: gammainvcdf, loggamma
-using ReactiveMP: AbstractContinuousGenericLogPdf, GenericLogPdfVectorisedProduct, UnspecifiedDomain, approximate_prod_with_sample_list
-using RxInfer: AutoProposal, SampleListFormConstraint
 using Random
+using ReactiveMP
+using DomainSets
+using StatsFuns: gammainvcdf, loggamma
+using BayesBase: AbstractContinuousGenericLogPdf, LinearizedProductOf
+using LoopVectorization: vmap, @turbo
 
-import Base: prod, rand, eltype, size
-import Distributions: logpdf, mean
-import Random: rand, rand!
-import ReactiveMP: getdomain, getlogpdf
-import RxInfer: __approximate
+import Base: size, eltype
+import BayesBase: rand!
+import Distributions: logpdf, insupport, _rand!
+import DomainSets: dimension
 
 
 h(A) = -diag(A'*safelog.(A))
@@ -20,46 +20,34 @@ mean_h(d::PointMass) = (d.point, h(d.point))
 # ContinuousMatrixvariateLogPdf
 #------------------------------
 
-struct ContinuousMatrixvariateLogPdf{D <: Domain, F} <: AbstractContinuousGenericLogPdf
-    domain::D
+struct ContinuousMatrixvariateLogPdf{T <: Tuple, F} <: AbstractContinuousGenericLogPdf
+    domain::T
     logpdf::F
 end
 
-ContinuousMatrixvariateLogPdf(f::Function) = ContinuousMatrixvariateLogPdf(UnspecifiedDomain(), f)
+dimension(d::Tuple) = dimension.(d)
+DomainSets.in(x::AbstractMatrix, domain::Tuple) = (size(x) == dimension(domain))
+insupport(d::ContinuousMatrixvariateLogPdf, x) = true  # TODO: make right
 
-getdomain(d::ContinuousMatrixvariateLogPdf) = d.domain
-getlogpdf(d::ContinuousMatrixvariateLogPdf) = d.logpdf
+# These are hacks to make _rand! work with matrix variate logpfds
+eltype(::LinearizedProductOf) = Float64
+eltype(::ContinuousMatrixvariateLogPdf) = Float64
 
 
 #-----------
 # SampleList
 #-----------
 
-function __approximate(constraint::SampleListFormConstraint{N, R, S, M}, left::ContinuousMatrixvariateLogPdf, right) where {N, R, S <: AutoProposal, M}
-    return approximate_prod_with_sample_list(constraint.rng, constraint.method, right, left, N)
-end
-
-function __approximate(constraint::SampleListFormConstraint{N, R, S, M}, left, right::ContinuousMatrixvariateLogPdf) where {N, R, S <: AutoProposal, M}
-    return approximate_prod_with_sample_list(constraint.rng, constraint.method, left, right, N)
-end
-
-function __approximate(constraint::SampleListFormConstraint{N, R, S, M}, left::GenericLogPdfVectorisedProduct, right) where {N, R, S <: AutoProposal, M}
-    return approximate_prod_with_sample_list(constraint.rng, constraint.method, right, left, N)
-end
-
-function __approximate(constraint::SampleListFormConstraint{N, R, S, M}, left, right::GenericLogPdfVectorisedProduct) where {N, R, S <: AutoProposal, M}
-    return approximate_prod_with_sample_list(constraint.rng, constraint.method, left, right, N)
-end
-
-# These are hacks to make _rand! work with matrix variate logpfds
-eltype(::GenericLogPdfVectorisedProduct) = Float64
-eltype(::ContinuousMatrixvariateLogPdf) = Float64
-
 function mean_h(d::SampleList)
-    s = get_samples(d)
-    w = get_weights(d)
+    s = d.samples
+    w = d.weights
+    N = length(w)
+    s_vec = reshape(s, (ndims(d)..., N))
 
-    return (sum(s.*w), sum(h.(s).*w))
+    m   = mapreduce(i->s_vec[:,:,i].*w[i], +, 1:N)
+    m_h = mapreduce(i->h(s_vec[:,:,i]).*w[i], +, 1:N)
+
+    return (m, m_h)
 end
 
 
@@ -81,23 +69,27 @@ end
     return H
 end
 
-# In-place operations for sampling
-function rand!(rng::AbstractRNG, d::MatrixDirichlet, container::Array{Float64, 3})
-    s = size(d)
-    for i in 1:size(container, 3)
-        M = view(container, :, :, i)
-        sample = rand(rng, d)
-        copyto!(M, sample)
+# Patch rand! as defined in ExponentialFamilies
+function rand!(rng::AbstractRNG, dist::MatrixDirichlet, container::AbstractMatrix{T}) where {T <: Real}
+    samples = vmap(d -> rand(rng, Dirichlet(convert(Vector, d))), eachcol(dist.a))
+    @views for col in 1:size(container)[2]
+        b = container[:, col]
+        b[:] .= samples[col]
     end
 
     return container
 end
 
-# Custom sampling implementation
-function rand(rng::AbstractRNG, d::MatrixDirichlet)
-    U = rand(rng, size(d.a)...)
-    S = gammainvcdf.(d.a, 1.0, U)
-    return S./sum(S, dims=1) # Normalize columns
+function _rand!(rng::AbstractRNG, dist::MatrixDirichlet, container::Array{Any, 3})
+    for i = 1:size(container)[3]
+        samples = vmap(d -> rand(rng, Dirichlet(convert(Vector, d))), eachcol(dist.a))
+        @views for col in 1:size(container)[2]
+            b = container[:, col, i]
+            b[:] .= samples[col]
+        end
+    end
+
+    return container
 end
 
 function mean_h(d::MatrixDirichlet)

@@ -1,7 +1,10 @@
+using DomainSets
 using ForwardDiff: jacobian
 using TupleTools: deleteat
-using ReactiveMP: AbstractNodeFunctionalDependenciesPipeline, RequireMarginalFunctionalDependencies, messagein, setmessage!, get_samples, get_weights
-import ReactiveMP: message_dependencies, marginal_dependencies
+using ReactiveMP: FunctionalDependencies, messagein, setmessage!, getlocalclusters, clusterindex, getmarginals
+using Base.Broadcast: BroadcastFunction
+
+import ReactiveMP: functional_dependencies
 
 include("distributions.jl")
 
@@ -29,41 +32,44 @@ GeneralizedMeta() = GeneralizedMeta(missing, 20)
 GeneralizedMeta(point) = GeneralizedMeta(point, 20)
 
 # Pipelines
-struct BethePipeline <: AbstractNodeFunctionalDependenciesPipeline end
-struct GeneralizedPipeline <: AbstractNodeFunctionalDependenciesPipeline
+struct BethePipeline <: FunctionalDependencies end
+struct GeneralizedPipeline <: FunctionalDependencies
     init_message::Union{Bernoulli, Categorical}
 
     GeneralizedPipeline() = new() # If state is clamped, then no inital message is required
     GeneralizedPipeline(init_message::Union{Bernoulli, Categorical}) = new(init_message)
 end
 
-function message_dependencies(::BethePipeline, nodeinterfaces, nodelocalmarginals, varcluster, cindex, iindex)
-    return ()
+function functional_dependencies(::BethePipeline, factornode, interface, iindex)
+    message_dependencies = ()
+    
+    clusters = getlocalclusters(factornode)
+    marginal_dependencies = getmarginals(clusters) # Include all node-local marginals
+
+    return message_dependencies, marginal_dependencies
 end
 
-# Bethe update rules for goal-observation node require marginals on all edges
-function marginal_dependencies(::BethePipeline, nodeinterfaces, nodelocalmarginals, varcluster, cindex, iindex)
-    return nodelocalmarginals
-end
+function functional_dependencies(pipeline::GeneralizedPipeline, factornode, interface, iindex)
+    clusters = getlocalclusters(factornode)
+    cindex = clusterindex(clusters, iindex) # Find the index of the cluster for the current interface
 
-# Generalized update rule for state requires inbound message
-function message_dependencies(pipeline::GeneralizedPipeline, nodeinterfaces, nodelocalmarginals, varcluster, cindex, iindex)
-    if iindex === 2 && isdefined(pipeline, :init_message) # Message towards state
-        input = ReactiveMP.messagein(nodeinterfaces[iindex])
-        ReactiveMP.setmessage!(input, pipeline.init_message) # Predefine breaker message
-        return (nodeinterfaces[iindex],) # Include inbound message on state
+    # Message dependencies
+    if (iindex === 2) # Message towards state
+        output = messagein(interface)
+        setmessage!(output, pipeline.init_message)
+        message_dependencies = (interface, )
     else
-        return ()
+        message_dependencies = ()
     end
-end
 
-# Generalized update rule for state requires inbound marginal
-function marginal_dependencies(::GeneralizedPipeline, nodeinterfaces, nodelocalmarginals, varcluster, cindex, iindex)
+    # Marginal dependencies
     if (iindex === 2) || (iindex === 3) # Message towards state or parameter
-        return nodelocalmarginals # Include all marginals
+        marginal_dependencies = getmarginals(clusters) # Include all marginals
     else
-        return deleteat(nodelocalmarginals, cindex) # Include default marginals
+        marginal_dependencies = skipindex(getmarginals(clusters), cindex) # Skip current cluster
     end
+
+    return message_dependencies, marginal_dependencies
 end
 
 
@@ -75,9 +81,9 @@ end
                                             q_z::Union{Bernoulli, Categorical, PointMass}, 
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::BetheMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     # Compute internal marginal
     x = softmax(log_A*z + log_c)
@@ -89,9 +95,9 @@ end
                                             q_z::Union{Bernoulli, Categorical}, 
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::BetheMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     # Compute internal marginal
     x = softmax(log_A*z + log_c)
@@ -103,9 +109,9 @@ end
                                             q_z::Union{Bernoulli, Categorical, PointMass}, 
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::BetheMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     # Compute internal marginal
     x = softmax(log_A*z + log_c)
@@ -117,9 +123,9 @@ end
                                  q_z::Union{Bernoulli, Categorical, PointMass}, 
                                  q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                  meta::BetheMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     # Compute internal marginal
     x = softmax(log_A*z + log_c)
@@ -143,7 +149,7 @@ end
                                             q_z::Union{Bernoulli, Categorical}, # Unused
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::BetheMeta{<:AbstractVector}) = begin
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     return Categorical(softmax(log_A'*meta.x))
 end
@@ -161,9 +167,9 @@ end
                                  q_z::Union{Bernoulli, Categorical, PointMass}, 
                                  q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                  meta::BetheMeta{<:AbstractVector}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = mean(log, q_A)
+    log_A = mean(BroadcastFunction(log), q_A)
 
     return -meta.x'*(log_A*z + log_c)
 end
@@ -188,7 +194,7 @@ end
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::GeneralizedMeta{Missing}) = begin
     d = probvec(m_z)
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z_0 = probvec(q_z)
     (A, h_A) = mean_h(q_A)
 
@@ -210,20 +216,21 @@ end
                                             q_z::Union{Bernoulli, Categorical, PointMass}, 
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass},
                                             meta::GeneralizedMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    A_bar = mean(q_A)                                            
+    A_bar = mean(q_A)
+    M, N = size(A_bar)
 
     log_mu(A) = (A*z)'*(log_c - safelog.(A_bar*z)) - z'*h(A)
 
-    return ContinuousMatrixvariateLogPdf(log_mu)
+    return ContinuousMatrixvariateLogPdf((RealNumbers()^M, RealNumbers()^N), log_mu)
 end
 
 @average_energy GoalObservation (q_c::Union{Dirichlet, PointMass}, 
                                  q_z::Union{Bernoulli, Categorical, PointMass}, 
                                  q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                  meta::GeneralizedMeta{Missing}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
     (A, h_A) = mean_h(q_A)
 
@@ -246,7 +253,7 @@ end
                                             q_z::Union{Bernoulli, Categorical}, # Unused
                                             q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                             meta::GeneralizedMeta{<:AbstractVector}) = begin
-    log_A = clamp.(mean(log, q_A), -12, 12)
+    log_A = clamp.(mean(BroadcastFunction(log), q_A), -12, 12)
     return Categorical(softmax(log_A'*meta.x))
 end
 
@@ -263,9 +270,9 @@ end
                                  q_z::Union{Bernoulli, Categorical, PointMass}, 
                                  q_A::Union{SampleList, MatrixDirichlet, PointMass}, 
                                  meta::GeneralizedMeta{<:AbstractVector}) = begin
-    log_c = mean(log, q_c)
+    log_c = mean(BroadcastFunction(log), q_c)
     z = probvec(q_z)
-    log_A = clamp.(mean(log, q_A), -12, 12)
+    log_A = clamp.(mean(BroadcastFunction(log), q_A), -12, 12)
 
     return -meta.x'*(log_A*z + log_c)
 end

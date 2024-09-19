@@ -10,7 +10,7 @@ end
 function initializeGoalAgent(A, B, C_0, D; t_maze_model::Function)
     iterations = 50 # Iterations of variational algorithm
     C_s = deepcopy(C_0)
-    function infer(t::Int64, a::Vector, o::Vector)
+    function inference(t::Int64, a::Vector, o::Vector)
         # Define possible policies
         G = Matrix{Union{Float64, Missing}}(missing, 4, 4)
         if t === 1
@@ -37,27 +37,22 @@ function initializeGoalAgent(A, B, C_0, D; t_maze_model::Function)
         end
     
         # Define model
-        model = t_maze_model(A, C_s, D, x) # Add tiny to prevent numerical problems
+        model = t_maze_model(A=A, C_s=C_s, D=D, x=x)
     
         # Define constraints
-        constraints = structured() # Sampling approximation for t<3
-    
+        constraints    = structured()
+        initialization = init_marginals(C_s)
+
         for (i, j) in pols
             data = (u = [B[i], B[j]],)
-    
-            initmarginals = (c   = [Dirichlet(C_s[1]), 
-                                    Dirichlet(C_s[2])],
-                             z_0 = Categorical(asym(8)),
-                             z   = [Categorical(asym(8)),
-                                    Categorical(asym(8))])
-    
-            res = inference(model         = model,
-                            constraints   = constraints, 
-                            data          = data,
-                            initmarginals = initmarginals,
-                            iterations    = iterations,
-                            free_energy   = true)
-            
+        
+            res = infer(model          = model,
+                        constraints    = constraints, 
+                        data           = data,
+                        initialization = initialization,
+                        iterations     = iterations,
+                        free_energy    = true)
+        
             G[i, j] = res.free_energy[end]/log(2) # Convert to bits
             if t === 3 # Return posterior statistics after learning
                 C_s = Vector{Vector}(undef, 2)
@@ -79,5 +74,5 @@ function initializeGoalAgent(A, B, C_0, D; t_maze_model::Function)
         return idx[pol][t] # Select current action from policy
     end
 
-    return (infer, act)
+    return (inference, act)
 end

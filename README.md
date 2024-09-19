@@ -1,7 +1,7 @@
-This repository contains the source code for the simulations performed in Part I and II of the "Realising Synthetic Active Inference Agents" paper series. Simulations are performed with Jupyter Notebook, Julia and RxInfer.
+This repository contains the source code for the simulations performed in Part I and II of the "Realising Synthetic Active Inference Agents" paper series. Simulations are performed with Jupyter Notebook, Julia and RxInfer. Original figures can be regenerated from the `v0.1.0` release of this repository.
 
 # Install Julia
-In order to install the Julia language (v1.8 or higher), follow the platform-specific instructions at https://julialang.org/downloads/
+In order to install the Julia language (`v1.10.4`), follow the platform-specific instructions at https://julialang.org/downloads/
 
 # Install Jupyter Notebook
 Jupyter notebook is a framework for running Julia scripts (among other languages). It is well-suited for showing demo applications and interactive experimentation. In order to install Jupyter Notebook, follow the instructions at https://jupyter.readthedocs.io/en/latest/install.html
@@ -17,7 +17,7 @@ julia> ]
 ```
 Next, activate the virtual environment
 ```
-(v1.8) pkg> activate .
+(v1.10) pkg> activate .
 ```
 and instantiate the required packages
 ```
@@ -30,7 +30,7 @@ Exit Julia, navigate to the root directory and start a Jupyter server
 ```
 ~/LAIF$ jupyter notebook
 ```
-A browser window will open, and you can select the demo you wish to run.
+A browser window should open, and you can select the demo you wish to run.
 
 # License
 MIT License, Copyright (c) 2024 BIASlab http://biaslab.org

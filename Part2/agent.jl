@@ -31,7 +31,7 @@ function initializeAgent(A_0, B, C, D_0)
     iterations = 50 # Iterations of variational algorithm
     A_s = deepcopy(A_0)
     D_s = deepcopy(D_0)
-    function infer(t::Int64, a::Vector, o::Vector)
+    function inference(t::Int64, a::Vector, o::Vector)
         # Define possible policies
         G = Matrix{Union{Float64, Missing}}(missing, 4, 4)
         if t === 1
@@ -58,26 +58,22 @@ function initializeAgent(A_0, B, C, D_0)
         end
     
         # Define model
-        model = t_maze(A_s, D_s, x)
+        model = t_maze(A_s=A_s, D_s=D_s, x=x)
     
         # Define constraints
-        constraints = structured(t<3) # Sampling approximation for t<3
-    
+        constraints    = structured(t<3) # Sampling approximation for t<3
+        initialization = init_marginals(A_s)
+
         for (i, j) in pols
             data = (u = [B[i], B[j]],
                     c = [C, C])
     
-            initmarginals = (A   = MatrixDirichlet(asym(A_s)),
-                             z_0 = Categorical(asym(8)),
-                             z   = [Categorical(asym(8)),
-                                    Categorical(asym(8))])
-    
-            res = inference(model         = model,
-                            constraints   = constraints, 
-                            data          = data,
-                            initmarginals = initmarginals,
-                            iterations    = iterations,
-                            free_energy   = true)
+            res = infer(model          = model,
+                        constraints    = constraints, 
+                        data           = data,
+                        initialization = initialization,
+                        iterations     = iterations,
+                        free_energy    = true)
             
             G[i, j] = mean(res.free_energy[10:iterations])./log(2) # Average to smooth fluctuations and convert to bits
             if t === 3 # Return posterior statistics after learning
@@ -98,5 +94,5 @@ function initializeAgent(A_0, B, C, D_0)
         return idx[pol][t] # Select current action from policy
     end
 
-    return (infer, act)
+    return (inference, act)
 end
